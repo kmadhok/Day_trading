@@ -18,6 +18,7 @@ from indicators import calculate_all_indicators, drop_warmup_period
 from signals import generate_signals, get_signal_summary
 from export import export_with_summary
 from backtest import SimpleBacktest
+from strategy_config import StrategyType, get_strategy_config, get_all_strategies
 
 
 def parse_arguments():
@@ -50,6 +51,14 @@ def parse_arguments():
     )
     
     # Strategy parameters
+    parser.add_argument(
+        '--strategy', 
+        type=str, 
+        choices=['current', 'aggressive', 'conservative', 'all'],
+        default='current',
+        help='Trading strategy: current (original), aggressive (2/3 indicators), conservative (all + volume), or all (compare all three)'
+    )
+    
     parser.add_argument(
         '--trend-mode', 
         type=str, 
@@ -137,6 +146,98 @@ def print_progress(message, verbose=True):
         print(f"[{datetime.now().strftime('%H:%M:%S')}] {message}")
 
 
+def run_single_strategy(clean_data, args, strategy_type, verbose=True):
+    """
+    Run a single strategy and return results.
+    
+    Args:
+        clean_data (pd.DataFrame): Cleaned data with indicators
+        args: Command line arguments
+        strategy_type (StrategyType): Strategy type to run
+        verbose (bool): Whether to print progress
+        
+    Returns:
+        dict: Strategy results including signal data, summary, export info, and backtest results
+    """
+    config = get_strategy_config(strategy_type)
+    
+    print_progress(f"Generating {config.name} strategy signals ({args.trend_mode} mode)...", verbose)
+    
+    try:
+        # Generate signals
+        signal_data = generate_signals(clean_data, trend_mode=args.trend_mode, strategy_type=strategy_type)
+        signal_summary = get_signal_summary(signal_data, trend_mode=args.trend_mode, strategy_type=strategy_type)
+        
+        if not signal_summary["validation"]["valid"]:
+            print(f"{config.name} signal validation failed: {signal_summary['validation']['error']}", file=sys.stderr)
+            return None
+        
+        print_progress(f"{config.name} signals: {signal_summary['buy_signals']} BUY, {signal_summary['sell_signals']} SELL", verbose)
+        
+        # Export to CSV
+        print_progress(f"Exporting {config.name} strategy to CSV...", verbose)
+        
+        # Create strategy-specific filename
+        if args.filename:
+            base_filename = args.filename
+            if not base_filename.endswith('.csv'):
+                base_filename += '.csv'
+            strategy_filename = base_filename.replace('.csv', f'_{strategy_type.value}.csv')
+        else:
+            strategy_filename = None
+        
+        export_summary = export_with_summary(
+            signal_data,
+            ticker=args.ticker,
+            interval=args.interval,
+            trend_mode=args.trend_mode,
+            output_dir=args.output_dir,
+            filename=strategy_filename,
+            print_summary=False  # We'll print our own summary
+        )
+        
+        if not export_summary["export_successful"]:
+            print(f"{config.name} export failed: {export_summary['error']}", file=sys.stderr)
+            return None
+        
+        # Run backtest if requested
+        backtest_results = None
+        if args.backtest:
+            print_progress(f"Running {config.name} backtest simulation...", verbose)
+            
+            bt = SimpleBacktest(
+                initial_capital=args.initial_capital,
+                commission=args.commission,
+                slippage=args.slippage
+            )
+            
+            backtest_results = bt.run_backtest(signal_data)
+            
+            # Export backtest results
+            if args.output_dir or args.filename:
+                bt_filename = f"backtest_{args.ticker}_{args.interval}_{args.trend_mode}_{strategy_type.value}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+                if args.output_dir:
+                    bt_filepath = f"{args.output_dir}/{bt_filename}"
+                else:
+                    bt_filepath = bt_filename
+                
+                bt.export_results(bt_filepath, args.ticker, args.interval, args.trend_mode)
+                print_progress(f"{config.name} backtest results exported to: {bt_filepath}", verbose)
+        
+        return {
+            'strategy_type': strategy_type,
+            'config': config,
+            'signal_data': signal_data,
+            'signal_summary': signal_summary,
+            'export_summary': export_summary,
+            'backtest_results': backtest_results
+        }
+        
+    except Exception as e:
+        print(f"Error running {config.name} strategy: {str(e)}", file=sys.stderr)
+        return None
+
+
 def main():
     """Main application entry point."""
     start_time = time.time()
@@ -148,7 +249,7 @@ def main():
         verbose = args.verbose and not args.quiet
         
         print_progress("Starting Day Trading Signal Engine", verbose)
-        print_progress(f"Configuration: {args.ticker} {args.interval} ({args.period}, {args.trend_mode} mode)", verbose)
+        print_progress(f"Configuration: {args.ticker} {args.interval} ({args.period}, {args.trend_mode} mode, {args.strategy} strategy)", verbose)
         
         # Step 1: Fetch market data
         print_progress("Fetching market data from Yahoo Finance...", verbose)
@@ -206,82 +307,157 @@ def main():
             print(f"Error processing warm-up period: {str(e)}", file=sys.stderr)
             return 1
         
-        # Step 5: Generate trading signals
-        print_progress(f"Generating trading signals ({args.trend_mode} mode)...", verbose)
-        
-        try:
-            signal_data = generate_signals(clean_data, trend_mode=args.trend_mode)
-            signal_summary = get_signal_summary(signal_data, trend_mode=args.trend_mode)
+        # Step 5: Generate trading signals and run strategies
+        if args.strategy == 'all':
+            # Run all three strategies
+            print_progress(f"Running all strategies ({args.trend_mode} mode)...", verbose)
             
-            if not signal_summary["validation"]["valid"]:
-                print(f"Signal validation failed: {signal_summary['validation']['error']}", file=sys.stderr)
-                return 1
+            strategy_results = {}
+            strategies_to_run = [StrategyType.CURRENT, StrategyType.AGGRESSIVE, StrategyType.CONSERVATIVE]
             
-            print_progress(f"Signals generated: {signal_summary['buy_signals']} BUY, {signal_summary['sell_signals']} SELL", verbose)
+            for strategy_type in strategies_to_run:
+                print_progress(f"Running {strategy_type.value} strategy...", verbose)
+                
+                result = run_single_strategy(clean_data, args, strategy_type, verbose)
+                if result is None:
+                    print(f"Failed to run {strategy_type.value} strategy", file=sys.stderr)
+                    return 1
+                
+                strategy_results[strategy_type] = result
             
-        except Exception as e:
-            print(f"Error generating signals: {str(e)}", file=sys.stderr)
-            return 1
-        
-        # Step 6: Export to CSV
-        print_progress("Exporting signals to CSV...", verbose)
-        
-        try:
-            export_summary = export_with_summary(
-                signal_data,
-                ticker=args.ticker,
-                interval=args.interval,
-                trend_mode=args.trend_mode,
-                output_dir=args.output_dir,
-                filename=args.filename,
-                print_summary=verbose
-            )
-            
-            if not export_summary["export_successful"]:
-                print(f"Export failed: {export_summary['error']}", file=sys.stderr)
-                return 1
-            
-        except Exception as e:
-            print(f"Error exporting CSV: {str(e)}", file=sys.stderr)
-            return 1
-        
-        # Step 7: Run backtest if requested
-        backtest_results = None
-        if args.backtest:
-            print_progress("Running backtest simulation...", verbose)
-            
+            # Create strategy comparison and combined export
             try:
-                bt = SimpleBacktest(
-                    initial_capital=args.initial_capital,
-                    commission=args.commission,
-                    slippage=args.slippage
+                from strategy_comparison import create_strategy_comparison, export_combined_strategies
+                
+                # Export combined strategies CSV
+                combined_export = export_combined_strategies(
+                    strategy_results,
+                    ticker=args.ticker,
+                    interval=args.interval,
+                    trend_mode=args.trend_mode,
+                    output_dir=args.output_dir,
+                    filename=args.filename
                 )
                 
-                backtest_results = bt.run_backtest(signal_data)
+                # Create comparison summary
+                comparison_summary = create_strategy_comparison(
+                    strategy_results,
+                    ticker=args.ticker,
+                    interval=args.interval,
+                    trend_mode=args.trend_mode,
+                    output_dir=args.output_dir
+                )
                 
-                if verbose:
-                    print("\nBacktest Results:")
-                    print(f"Total Trades: {backtest_results['total_trades']}")
-                    print(f"Win Rate: {backtest_results['win_rate']}%")
-                    print(f"Total Return: ${backtest_results['total_return']} ({backtest_results['total_return_pct']}%)")
-                    print(f"Max Drawdown: {backtest_results['max_drawdown']}%")
-                    print(f"Profit Factor: {backtest_results['profit_factor']}")
-                    print(f"Sharpe Ratio: {backtest_results['sharpe_ratio']}")
-                
-                # Export backtest results
-                if args.output_dir or args.filename:
-                    bt_filename = f"backtest_{args.ticker}_{args.interval}_{args.trend_mode}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-                    if args.output_dir:
-                        bt_filepath = f"{args.output_dir}/{bt_filename}"
-                    else:
-                        bt_filepath = bt_filename
+                if not args.quiet:
+                    print(f"\n{'='*80}")
+                    print("STRATEGY COMPARISON SUMMARY")
+                    print(f"{'='*80}")
                     
-                    bt.export_results(bt_filepath, args.ticker, args.interval, args.trend_mode)
-                    print_progress(f"Backtest results exported to: {bt_filepath}", verbose)
+                    for strategy_type, result in strategy_results.items():
+                        config = result['config']
+                        summary = result['signal_summary']
+                        backtest = result['backtest_results']
+                        
+                        print(f"\n{config.name} Strategy:")
+                        print(f"  Signals: {summary['buy_signals']} BUY, {summary['sell_signals']} SELL")
+                        print(f"  Signal Rate: {summary['buy_frequency_pct'] + summary['sell_frequency_pct']:.2f}%")
+                        if backtest:
+                            print(f"  Return: {backtest['total_return_pct']:.2f}%")
+                            print(f"  Win Rate: {backtest['win_rate']:.1f}%")
+                            print(f"  Max Drawdown: {backtest['max_drawdown']:.2f}%")
+                
+                # Set variables for final summary
+                signal_data = strategy_results[StrategyType.CURRENT]['signal_data']
+                signal_summary = strategy_results[StrategyType.CURRENT]['signal_summary'] 
+                export_summary = combined_export
+                backtest_results = strategy_results[StrategyType.CURRENT]['backtest_results']
+                
+            except ImportError:
+                print("Strategy comparison module not found, creating it...", file=sys.stderr)
+                return 1
+            except Exception as e:
+                print(f"Error in multi-strategy execution: {str(e)}", file=sys.stderr)
+                return 1
+                
+        else:
+            # Run single strategy (existing logic)
+            strategy_type = StrategyType(args.strategy)
+            
+            print_progress(f"Generating {args.strategy} strategy signals ({args.trend_mode} mode)...", verbose)
+            
+            try:
+                signal_data = generate_signals(clean_data, trend_mode=args.trend_mode, strategy_type=strategy_type)
+                signal_summary = get_signal_summary(signal_data, trend_mode=args.trend_mode, strategy_type=strategy_type)
+                
+                if not signal_summary["validation"]["valid"]:
+                    print(f"Signal validation failed: {signal_summary['validation']['error']}", file=sys.stderr)
+                    return 1
+                
+                print_progress(f"Signals generated: {signal_summary['buy_signals']} BUY, {signal_summary['sell_signals']} SELL", verbose)
                 
             except Exception as e:
-                print(f"Error running backtest: {str(e)}", file=sys.stderr)
+                print(f"Error generating signals: {str(e)}", file=sys.stderr)
                 return 1
+            
+            # Step 6: Export to CSV
+            print_progress("Exporting signals to CSV...", verbose)
+            
+            try:
+                export_summary = export_with_summary(
+                    signal_data,
+                    ticker=args.ticker,
+                    interval=args.interval,
+                    trend_mode=args.trend_mode,
+                    output_dir=args.output_dir,
+                    filename=args.filename,
+                    print_summary=verbose
+                )
+                
+                if not export_summary["export_successful"]:
+                    print(f"Export failed: {export_summary['error']}", file=sys.stderr)
+                    return 1
+                
+            except Exception as e:
+                print(f"Error exporting CSV: {str(e)}", file=sys.stderr)
+                return 1
+            
+            # Step 7: Run backtest if requested
+            backtest_results = None
+            if args.backtest:
+                print_progress("Running backtest simulation...", verbose)
+                
+                try:
+                    bt = SimpleBacktest(
+                        initial_capital=args.initial_capital,
+                        commission=args.commission,
+                        slippage=args.slippage
+                    )
+                    
+                    backtest_results = bt.run_backtest(signal_data)
+                    
+                    if verbose:
+                        print("\nBacktest Results:")
+                        print(f"Total Trades: {backtest_results['total_trades']}")
+                        print(f"Win Rate: {backtest_results['win_rate']}%")
+                        print(f"Total Return: ${backtest_results['total_return']} ({backtest_results['total_return_pct']}%)")
+                        print(f"Max Drawdown: {backtest_results['max_drawdown']}%")
+                        print(f"Profit Factor: {backtest_results['profit_factor']}")
+                        print(f"Sharpe Ratio: {backtest_results['sharpe_ratio']}")
+                    
+                    # Export backtest results
+                    if args.output_dir or args.filename:
+                        bt_filename = f"backtest_{args.ticker}_{args.interval}_{args.trend_mode}_{strategy_type.value}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+                        if args.output_dir:
+                            bt_filepath = f"{args.output_dir}/{bt_filename}"
+                        else:
+                            bt_filepath = bt_filename
+                        
+                        bt.export_results(bt_filepath, args.ticker, args.interval, args.trend_mode)
+                        print_progress(f"Backtest results exported to: {bt_filepath}", verbose)
+                    
+                except Exception as e:
+                    print(f"Error running backtest: {str(e)}", file=sys.stderr)
+                    return 1
         
         # Final summary
         elapsed_time = time.time() - start_time

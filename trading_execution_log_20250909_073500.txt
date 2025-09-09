@@ -1,0 +1,110 @@
+DAY TRADING SIGNAL ENGINE EXECUTION LOG
+Generated: 2025-09-09 07:35:00
+Command: python3 main.py --strategy all --backtest --trend-mode pullback --verbose
+
+================================================================================
+EXECUTION OUTPUT
+================================================================================
+
+[07:13:54] Starting Day Trading Signal Engine
+[07:13:54] Configuration: SPY 15m (60d, pullback mode, all strategy)
+[07:13:54] Fetching market data from Yahoo Finance...
+[07:13:57] Fetched 1620 bars from 2025-06-12 09:30:00-04:00 to 2025-09-08 16:00:00-04:00
+[07:13:57] Validating data quality...
+[07:13:57] Data validation passed
+[07:13:57] Calculating technical indicators (SMA, MACD, RSI)...
+[07:13:57] Technical indicators calculated
+[07:13:57] Removing warm-up period...
+[07:13:57] Clean data: 1420 bars after warm-up removal
+[07:13:57] Running all strategies (pullback mode)...
+[07:13:57] Running current strategy...
+[07:13:57] Generating Current strategy signals (pullback mode)...
+[07:13:58] Current signals: 3 BUY, 0 SELL
+[07:13:58] Exporting Current strategy to CSV...
+[07:13:58] Running Current backtest simulation...
+[07:14:00] Running aggressive strategy...
+[07:14:00] Generating Aggressive strategy signals (pullback mode)...
+[07:14:00] Aggressive signals: 43 BUY, 20 SELL
+[07:14:00] Exporting Aggressive strategy to CSV...
+[07:14:00] Running Aggressive backtest simulation...
+[07:14:02] Running conservative strategy...
+[07:14:02] Generating Conservative strategy signals (pullback mode)...
+[07:14:02] Conservative signals: 0 BUY, 0 SELL
+[07:14:02] Exporting Conservative strategy to CSV...
+[07:14:02] Running Conservative backtest simulation...
+
+================================================================================
+STRATEGY COMPARISON SUMMARY
+================================================================================
+
+Current Strategy:
+  Signals: 3 BUY, 0 SELL
+  Signal Rate: 0.21%
+  Return: 0.24%
+  Win Rate: 100.0%
+  Max Drawdown: -0.20%
+
+Aggressive Strategy:
+  Signals: 43 BUY, 20 SELL
+  Signal Rate: 4.44%
+  Return: -0.07%
+  Win Rate: 43.8%
+  Max Drawdown: -0.39%
+
+Conservative Strategy:
+  Signals: 0 BUY, 0 SELL
+  Signal Rate: 0.00%
+  Return: 0.00%
+  Win Rate: 0.0%
+  Max Drawdown: 0.00%
+
+============================================================
+DAY TRADING SIGNAL ENGINE - EXECUTION COMPLETE
+============================================================
+Ticker: SPY (15m)
+Trend Mode: pullback
+Data Period: 60d
+Processing Time: 10.50 seconds
+CSV Output: signals_SPY_15m_pullback_all_strategies_20250909_071404.csv
+Total Bars: 1,420
+BUY Signals: 3
+SELL Signals: 0
+Signal Rate: 0.21%
+Backtest Return: 0.24%
+Win Rate: 100.0%
+============================================================
+
+================================================================================
+SYSTEM INFORMATION
+================================================================================
+Python Version: 3.11.2
+Dependencies Installed:
+- yfinance>=0.2.28
+- pandas>=2.0.0
+- numpy>=1.24.0
+- pytz>=2023.3
+- argparse
+- openpyxl (for Excel output)
+
+Virtual Environment: User installation with --break-system-packages
+Processing Time: 10.50 seconds
+Data Points: 1,420 bars after warmup period
+Date Range: 2025-06-12 to 2025-09-08 (60 days)
+
+FILES GENERATED:
+- signals_SPY_15m_pullback_20250909_071358.csv (Current Strategy)
+- signals_SPY_15m_pullback_20250909_071400.csv (Aggressive Strategy) 
+- signals_SPY_15m_pullback_20250909_071402.csv (Conservative Strategy)
+- signals_SPY_15m_pullback_all_strategies_20250909_071404.csv (Combined)
+- day_trading_report_20250909_073413.xlsx (Excel Report)
+- trading_execution_log_20250909_073500.txt (This Log File)
+
+STRATEGY PERFORMANCE SUMMARY:
+1. Current Strategy: Very conservative, only 3 BUY signals, 100% win rate, 0.24% return
+2. Aggressive Strategy: Most active, 63 total signals, 43.8% win rate, -0.07% return (small loss)
+3. Conservative Strategy: No signals generated due to strict criteria
+
+CONCLUSION:
+The current strategy performed best with positive returns and perfect win rate, though with very few trades.
+The aggressive strategy generated many more trading opportunities but with mixed results.
+The conservative strategy was too restrictive for the current market conditions.
